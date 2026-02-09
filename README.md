@@ -26,6 +26,8 @@ Sviatoslav BESNARD ([pro@slavi.dev](mailto:pro@slavi.dev))
   - [Abstract Syntax Tree (AST)](#abstract-syntax-tree-ast)
     - [Theory: How to convert the Ext. AST to the AST?](#theory-how-to-convert-the-ext-ast-to-the-ast)
     - [Practically: How to implement the theory from above?](#practically-how-to-implement-the-theory-from-above)
+    - [AST: Final Result](#ast-final-result)
+  - [Bytecode](#bytecode)
 
 
 ## Introduction
@@ -622,7 +624,7 @@ It's the star `*` at the end.
 It means that we can have an infinite number of terms. 
 And it's representation will look like this in our new simplified Ext. AST:
 
-![AST_A_and_B_and_C_Ext_AST_tree.pngg](images/AST_A_and_B_and_C_Ext_AST_tree.png)
+![AST_A_and_B_and_C_Ext_AST_tree.png](images/AST_A_and_B_and_C_Ext_AST_tree.png)
 <p align="center" width="100%">The simplified Ext. AST tree of the code "A and B and C" ("and" tokens are marked as Operator here, but there are in fact simple "STRING" token)</p>
 
 The main difference here is that nodes 3 and 6 are issued from the SAME node in the grammar.
@@ -654,13 +656,78 @@ Here is the true configuration (some columns are hidden for readability):
 You can see the presence of the column "Consume Condition?".
 When you create a provider (a new AST node) you consume the child parameters tha will be used as parameters of the new AST node.
 Most of the time you don't want to consume the parameters of the child node and you don't want to create a new AST node.
-So you set the "Consume Condition?" to true to a specific parameter and if there is no parameter, then no AST node will be created.
+So you set the "Consume Condition?" to true to a specific paramet~~~~er and if there is no parameter, then no AST node will be created.
 This is mostly a constraint from how the grammar is defined and structured.
 
 There are a few other bits of details like some data that are send top to done for some specific resaon (the ctx parameter for example) but I will not go into details here.
 
 ### Practically: How to implement the theory from above?
-TODO
+I will give you a hint: the Time dimension, AGAIN.
 
+In fact generating the AST Node at the good level is not _that_ difficult once you have your mapping table setup, and you have already go through the "omg, how can I perform a DFS in Anaplan via the Time dimension!?" thing when you created the ALT.
 
+![AST_anaplan_1.png](images/AST_anaplan_1.png)
+<p align="center" width="100%">Sample of the minimum line items to convert ALT to AST</p>
 
+Well this is without mentioning how its complicated to manage all the double linked array complexity (that was a nightmare), the name context that go from top to bottom of the Ext. AST, ...
+
+#### To AST: Context management
+In a Python AST when you have a string parameter like the name a function, a variable, etc ... you can invoke it with a different context depending of the usage.
+The most common one is Load, where you Load a string and use it to describe a function, do operations on it or whatever. 
+You have also Store, when you assign a new value to the variable (not loading its value) and Delete.
+
+What is difficulte here is the context will depend on the higher level of the tree.
+If you are in the left of a assignment or in the right.
+Moreover, the context must be in a stack since you can have multiple nested levels of context. So you can be in a Load context, then in a Store context and then again in a Load context (like when you assign a lambda function).
+
+![AST_anaplan_manage_ctx.png](images/AST_anaplan_manage_ctx.png)
+<p align="center" width="100%">Few line items that manage the context onion</p>
+
+#### To AST: Flat the array just before converting to AST
+To be honest, right now, I don't remember what half of what this code mean, but I felt very proud and exhausted when I implemented it so it must be very important.
+
+In simple words it converts all the AST Node we generated into a compact representation over the time range.
+There is a technical intermediary step call Raw AST.
+It's just here to remove some useless nodes at the end. 
+
+![AST_anaplan_arrays.png](images/AST_anaplan_arrays.png)
+
+#### To AST: The most unexpected difficulty
+Since the beginning we basically did this:
+![climb_back_the_process_1.png](images/climb_back_the_process_1.png)
+<p align="center" width="100%">Raw text to AST</p>
+
+We convert the Raw text to its purest and usable form.
+From left to right.
+
+What if I need climb back? To catch some useful information like in the ALT that is no more in the AST to presever the information along all the process? What if I want to know the position of an AST node in the raw text for exemple?
+
+For this we will use a nice property: the injectivity between each of the steps.
+That means for exemple: for an Ext. AST Node there is only at most one AST Node. And this is true for all.
+If you are good at Anaplan your first trough must be: hey why not use a `[LASTNOTBLANK: ]` aggregation on my Ext. AST with the raw AST Position as driver?
+Since there is at most one Ext. AST per Raw AST, this should work?
+
+Well not that much, because Time dimension is special, and you cannot aggregate `[LASTNOTBLANK: ]` over its self.
+And `TIMESUM(..., LASTNONBLANK)` will not work because you want it to be grouped by Raw AST.
+
+So your only "simple" solution is to create a fake Time dimension that mirror your true time dimension and use it as a pivot to perform the `[LASTNOTBLANK: ]` aggregation.
+
+Another fun part is to create to double connexion between children and parents in the trees.
+Like what are all my children? and what is my parent.
+Is not as simple is it look like and it involve most off the time the creation a stack to transfer the 
+
+![climb_back_the_process_2.png](images/climb_back_the_process_2.png)
+<p align="center" width="100%">Raw text to AST but where we can go back</p>
+
+### AST: Final Result
+After all this peregrination, we finally did it!
+We create an AST in Anaplan!
+
+```python
+A and B and C and D
+```
+
+![AST_anaplan_final_result.png](images/AST_anaplan_final_result.png)
+<p align="center" width="100%">Final AST module with each AST Node in line. Some days can have multiple children like 31 Dec 80 with one attribute "value" and the other one "bool.</p>
+
+## Bytecode
